@@ -26,7 +26,7 @@ if NRF_SYS_EVENT
 config NRF_SYS_EVENT_IRQ_LATENCY
 	bool "Register events to reduce interrupt handling latency"
 	default y
-	depends on (HAS_HW_NRF_RRAMC || HAS_HW_NRF_MRAMC) && !TRUSTED_EXECUTION_NONSECURE
+	depends on HAS_HW_NRF_RRAMC || HAS_HW_NRF_MRAMC
 
 config NRF_SYS_EVENT_IRQ_LATENCY_MANUAL
 	def_bool !RISCV
@@ -86,6 +86,16 @@ module-str = mram_latency
 source "subsys/logging/Kconfig.template.log_config"
 
 endif # MRAM_LATENCY
+
+config NRF_TFM_SYS_EVENT_SERVICE
+	bool "TF-M nrf_sys_event PSA service"
+	depends on BUILD_WITH_TFM
+	depends on NRF_SYS_EVENT
+	default y if (HAS_HW_NRF_RRAMC || HAS_HW_NRF_MRAMC)
+	help
+	  PSA service in the secure domain for nrf_sys_event manual NVM
+	  low-latency register/unregister. GRTC/GPPI timed wakeups remain
+	  in the non-secure application.
 
 if HAS_NORDIC_DMM
 

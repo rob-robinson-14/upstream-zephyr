@@ -5,6 +5,7 @@
  */
 
 #include <nrf_sys_event.h>
+#include <nrf_sys_event_primatives.h>
 #include <helpers/nrfx_gppi.h>
 #include <zephyr/logging/log.h>
 #ifdef CONFIG_NRF_SYS_EVENT_IRQ_LATENCY
@@ -14,6 +15,9 @@
 #include <hal/nrf_rramc.h>
 #elif defined(MRAMC_PRESENT)
 #include <hal/nrf_mramc.h>
+#endif
+#if IS_ENABLED(CONFIG_NRF_TFM_SYS_EVENT_SERVICE)
+#include <tfm_ioctl_core_api.h>
 #endif
 #endif
 LOG_MODULE_DECLARE(soc, CONFIG_SOC_LOG_LEVEL);
@@ -93,6 +97,10 @@ int nrf_sys_event_release_global_constlat(void)
 
 #include <nrfx_power.h>
 
+#ifndef CONFIG_ZERO_LATENCY_IRQS 
+static struct k_spinlock event_lock;
+#endif
+
 int nrf_sys_event_request_global_constlat(void)
 {
 	int err;
@@ -117,7 +125,6 @@ int nrf_sys_event_release_global_constlat(void)
 BUILD_ASSERT(IS_ENABLED(CONFIG_NRF_SYS_EVENT_IRQ_LATENCY_MANUAL) || NRF_SYS_EVENT_GPPI_ENABLED,
 	     "If manual mode is not available then at least 1 GRTC channel need to be used.");
 
-static uint32_t event_ref_cnt;
 static uint32_t chan_mask;
 
 /* Handle returned by the registering function can be a GRTC channel that was used which indicates
@@ -133,51 +140,16 @@ static uint32_t chan_mask;
  */
 #define NVM_WAKEUP_US (NVM_HW_WAKEUP_US - 1)
 
-static void irq_low_latency_on(bool enable)
-{
-#ifdef RRAMC_POWER_LOWPOWERCONFIG_MODE_Standby
-	nrf_rramc_lp_mode_set(NRF_RRAMC, enable ? NRF_RRAMC_LP_STANDBY : NRF_RRAMC_LP_POWER_OFF);
-#elif defined(MRAMC_POWER_AUTOPOWERDOWN_ENABLE_Enable)
-	nrf_mramc_power_autopowerdown_t cfg;
-
-	nrf_mramc_power_autopowerdown_get(NRF_MRAMC, &cfg);
-	/* Disable auto power down to enable reduced latency */
-	cfg.enable = !enable;
-	nrf_mramc_power_autopowerdown_set(NRF_MRAMC, &cfg);
-#endif
-}
-
-#ifdef CONFIG_ZERO_LATENCY_IRQS
-static uint32_t full_irq_lock(void)
-{
-	uint32_t mcu_critical_state;
-
-	mcu_critical_state = __get_PRIMASK();
-	__disable_irq();
-
-	return mcu_critical_state;
-}
-
-static void full_irq_unlock(uint32_t mcu_critical_state)
-{
-	__set_PRIMASK(mcu_critical_state);
-}
-
-#define LOCKED(lock) \
-	for (uint32_t __tmp = 0, __key = full_irq_lock(); !__tmp; full_irq_unlock(__key), __tmp = 1)
-#else
-static struct k_spinlock event_lock;
-#define LOCKED() K_SPINLOCK(&event_lock)
-#endif
 
 union nrf_sys_evt_us {
 	uint32_t rel;
 	uint64_t abs;
 };
 
-static int event_register(union nrf_sys_evt_us us, bool force, bool abs)
+static int event_register(union nrf_sys_evt_us us, bool force, bool abs, bool from_zli)
 {
-	int rv;
+	int rv = 0;
+	bool manual = false;
 
 	LOCKED() {
 		if (NRF_SYS_EVENT_GPPI_ENABLED &&
@@ -197,28 +169,20 @@ static int event_register(union nrf_sys_evt_us us, bool force, bool abs)
 		} else if ((chan_mask == 0) && (force == false)) {
 			rv = -ENOSYS;
 		} else {
-			if (event_ref_cnt == 0) {
-				irq_low_latency_on(true);
-			}
-			event_ref_cnt++;
+			manual = true;
 			rv = NRF_SYS_EVENT_MANUAL_HANDLE;
 		}
+	}
+
+	if (manual) {
+		nrf_sys_event_manual_register(from_zli);
+		
 	}
 
 	return rv;
 }
 
-int nrf_sys_event_register(uint32_t us, bool force)
-{
-	return event_register((union nrf_sys_evt_us)us, force, false);
-}
-
-int nrf_sys_event_abs_register(uint64_t us, bool force)
-{
-	return event_register((union nrf_sys_evt_us)us, force, true);
-}
-
-int nrf_sys_event_unregister(int handle, bool cancel)
+static int event_unregister(int handle, bool cancel, bool from_zli)
 {
 	__ASSERT_NO_MSG(handle >= 0);
 	int rv = 0;
@@ -229,24 +193,51 @@ int nrf_sys_event_unregister(int handle, bool cancel)
 		}
 		atomic_or((atomic_t *)&chan_mask, BIT(handle));
 		return rv;
-	}
-
-	LOCKED() {
-		if (IS_ENABLED(CONFIG_TRUSTED_EXECUTION_NONSECURE)) {
-			rv = -EINVAL;
-		} else {
-			__ASSERT_NO_MSG(event_ref_cnt > 0);
-			event_ref_cnt--;
-			if (event_ref_cnt == 0) {
-				irq_low_latency_on(false);
-			}
-		}
+	} else {
+		nrf_sys_event_manual_unregister(from_zli);
 	}
 
 	return rv;
 }
 
+int nrf_sys_event_register(uint32_t us, bool force)
+{
+	return event_register((union nrf_sys_evt_us)us, force, false, false);
+}
+
+int nrf_sys_event_abs_register(uint64_t us, bool force)
+{
+	return event_register((union nrf_sys_evt_us)us, force, true, false);
+}
+
+int nrf_sys_event_unregister_zli(int handle, bool cancel)
+{
+	event_unregister(handle, cancel, true);
+	return 0;
+}
+
+int nrf_sys_event_unregister(int handle, bool cancel)
+{
+	event_unregister(handle, cancel, false);
+	return 0;
+}
+
 #if NRF_SYS_EVENT_GPPI_ENABLED
+#if IS_ENABLED(CONFIG_NRF_TFM_SYS_EVENT_SERVICE)
+static int sys_event_tfm_gppi_conn_alloc(uint32_t evt, uint32_t tsk, uint32_t ppi_handle)
+{
+	enum tfm_platform_err_t err;
+	int32_t result;
+
+	err = tfm_platform_sys_event_gppi_conn_alloc(evt, tsk, ppi_handle, &result);
+	if (err != TFM_PLATFORM_ERR_SUCCESS) {
+		return -EPERM;
+	}
+
+	return 0;
+}
+#endif /** IS_ENABLED(CONFIG_NRF_TFM_SYS_EVENT_SERVICE) */
+
 int nrf_sys_event_init(void)
 {
 	/* Attempt to allocate requested amount of GRTC channels. */
@@ -262,7 +253,7 @@ int nrf_sys_event_init(void)
 	}
 
 	uint32_t chan_mask_cpy = chan_mask;
-	uint32_t tsk = nrf_rramc_task_address_get(NRF_RRAMC, NRF_RRAMC_TASK_WAKEUP);
+	uint32_t tsk = NRF_RRAMC_S_BASE + (uint32_t)NRF_RRAMC_TASK_WAKEUP;
 	bool first = true;
 	nrfx_gppi_handle_t ppi_handle;
 	nrf_grtc_event_t cc_evt;
@@ -278,10 +269,27 @@ int nrf_sys_event_init(void)
 		evt = nrf_grtc_event_address_get(NRF_GRTC, cc_evt);
 		if (first) {
 			first = false;
+#if IS_ENABLED(CONFIG_NRF_TFM_SYS_EVENT_SERVICE)
+			err = nrfx_gppi_domain_conn_alloc(nrfx_gppi_domain_id_get(evt),
+							  nrfx_gppi_domain_id_get(tsk),
+							  &ppi_handle);
+			if (err < 0) {
+				return err;
+			}
+			err = nrfx_gppi_ep_attach(evt, ppi_handle);
+			if (err < 0) {
+				return err;
+			}
+			err = sys_event_tfm_gppi_conn_alloc(evt, tsk, ppi_handle);
+			if (err < 0) {
+				return err;
+			}
+#else
 			err = nrfx_gppi_conn_alloc(evt, tsk, &ppi_handle);
 			if (err < 0) {
 				return err;
 			}
+#endif
 		} else {
 			nrfx_gppi_ep_attach(evt, ppi_handle);
 		}
