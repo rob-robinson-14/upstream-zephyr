@@ -83,3 +83,33 @@ int nrf_sys_event_abs_register(uint64_t us, bool force);
  * @retval -ENOTSUP Not supported.
  */
 int nrf_sys_event_unregister(int handle, bool cancel);
+
+/** @brief Unregister an event.
+ *
+ * It must be called after the registered event occurred or if it was canceled.
+ *
+ * @param handle Handle returned by @ref nrf_sys_event_register.
+ * @param cancel True to indicate that event is unregistered due to cancellation. Setting to true
+ * when event executed results only in slight longer duration of the operation.
+ *
+ * @retval 0 Successful operation.
+ * @retval -EINVAL Invalid handle.
+ * @retval -ENOTSUP Not supported.
+ */
+int nrf_sys_event_unregister_zli(int handle, bool cancel);
+
+/**
+ * @brief Register an event immediately
+ *
+ * Registering an event allows system to prepare for wake up minimizing power consumption
+ * and latency. When calling from a ZLI, low latency power mode for NVM memory is configured.
+ * This option is not available in non-secure build since there is not enough time to switch to
+ * SPE during ZLI context.
+ *
+ * @retval non-negative Handle which shall be used to unregister the event.
+ * @retval -ENOTSUP Feature is not supported.
+ */
+static inline void nrf_sys_event_register_now_zli(void)
+{
+	nrf_sys_event_manual_register(true);
+}
