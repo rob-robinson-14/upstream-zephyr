@@ -21,7 +21,6 @@ target_include_directories(platform_region_defs
         ${partition_includes}
 )
 
-
 target_sources(platform_s
     PRIVATE
         $<$<BOOL:${TFM_PARTITION_PLATFORM}>:${CMAKE_CURRENT_SOURCE_DIR}/src/tfm_platform_system.c>
@@ -34,6 +33,13 @@ target_include_directories(platform_s
         ${partition_includes}
         ${board_includes}
 )
+
+if(NRF_TFM_SYS_EVENT_SERVICE)
+    target_include_directories(platform_s
+        PUBLIC
+            ${ZEPHYR_BASE}/soc/nordic/common
+    )
+endif()
 
 if(BL2)
     target_include_directories(platform_bl2

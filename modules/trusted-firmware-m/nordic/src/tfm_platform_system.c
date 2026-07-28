@@ -27,7 +27,10 @@ enum tfm_platform_err_t tfm_platform_hal_ioctl(tfm_platform_ioctl_req_t request,
 	case TFM_PLATFORM_IOCTL_GPIO_SERVICE:
 		return tfm_platform_hal_gpio_service(in_vec, out_vec);
 #endif /* defined(GPIO_PIN_CNF_MCUSEL_Msk) */
-
+#if NRF_TFM_SYS_EVENT_SERVICE
+	case TFM_PLATFORM_IOCTL_SYS_EVENT_SERVICE:
+		return tfm_platform_hal_sys_event_service(in_vec, out_vec);
+#endif /* NRF_TFM_SYS_EVENT_SERVICE */
 
 	/* Board specific IOCTL services */
 
