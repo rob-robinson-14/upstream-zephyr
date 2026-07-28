@@ -38,6 +38,7 @@ endif()
 if(CONFIG_BUILD_WITH_TFM)
   set_property(TARGET zephyr_property_target
     APPEND PROPERTY TFM_CMAKE_OPTIONS -DHAL_NORDIC_PATH=${ZEPHYR_HAL_NORDIC_MODULE_DIR}
+    APPEND PROPERTY TFM_CMAKE_OPTIONS -DZEPHYR_BASE=${ZEPHYR_BASE}
   )
 
   if(CONFIG_SOC_NRF7120_TFM_MRAMC_SERVICE)
@@ -46,9 +47,16 @@ if(CONFIG_BUILD_WITH_TFM)
     set(nrf_mramc_service OFF)
   endif()
 
+  if(CONFIG_NRF_TFM_SYS_EVENT_SERVICE)
+    set(nrf_tfm_sys_event_service ON)
+  else()
+    set(nrf_tfm_sys_event_service OFF)
+  endif()
+
   set_property(TARGET zephyr_property_target
     APPEND PROPERTY TFM_CMAKE_OPTIONS -DNRF_NS_STORAGE=${CONFIG_TFM_NRF_NS_STORAGE}
     APPEND PROPERTY TFM_CMAKE_OPTIONS -DNRF_MRAMC_SERVICE=${nrf_mramc_service}
+    APPEND PROPERTY TFM_CMAKE_OPTIONS -DNRF_TFM_SYS_EVENT_SERVICE=${nrf_tfm_sys_event_service}
   )
 endif()
 
