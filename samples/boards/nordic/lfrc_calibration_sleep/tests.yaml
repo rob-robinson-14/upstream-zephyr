@@ -1,0 +1,9 @@
+sample:
+  name: nRF LFRC calibration sleep
+tests:
+  sample.boards.nrf.lfrc_calibration_sleep:
+    platform_allow:
+      - nrf7120dk/nrf7120/cpuapp
+    build_only: true
+    tags:
+      - clock_control
